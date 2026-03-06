@@ -141,6 +141,93 @@ class OneDFEMDriftDiffusion:
         }
 
 
+def _polyline_points(xs, ys, x_min, x_max, y_min, y_max, width, height, margin):
+    x0, y0, x1, y1 = margin, margin, width - margin, height - margin
+    pts = []
+    for x, y in zip(xs, ys):
+        xp = x0 + (x - x_min) / (x_max - x_min) * (x1 - x0)
+        yp = y1 - (y - y_min) / (y_max - y_min) * (y1 - y0)
+        pts.append(f"{xp:.2f},{yp:.2f}")
+    return " ".join(pts)
+
+
+def write_fermi_plot_svg(result, thickness_um, output_svg, voltage_v, cbm0_ev=0.35, vbm0_ev=-0.95):
+    z_m = result["z_m"]
+    x_um = [z * 1e6 for z in z_m]
+    l_um = max(thickness_um, 1e-15)
+
+    # 用线性电势降构造示意能带边（和样图风格接近）
+    delta_ev = max(min(voltage_v * 0.06, 0.6), -0.6)
+    e_cbm = [cbm0_ev + delta_ev * (x / l_um) for x in x_um]
+    e_vbm = [vbm0_ev + delta_ev * (x / l_um) for x in x_um]
+
+    # 费米能级用电子/空穴准费米的中线表示
+    e_fermi = [(a + b) * 0.5 for a, b in zip(result["E_fn_eV"], result["E_fp_eV"])]
+
+    y_all = e_cbm + e_vbm + e_fermi
+    y_min = min(y_all) - 0.08
+    y_max = max(y_all) + 0.08
+    if abs(y_max - y_min) < 1e-12:
+        y_max = y_min + 1.0
+
+    width, height = 900, 560
+    margin = 70
+
+    cbm_pts = _polyline_points(x_um, e_cbm, 0.0, l_um, y_min, y_max, width, height, margin)
+    vbm_pts = _polyline_points(x_um, e_vbm, 0.0, l_um, y_min, y_max, width, height, margin)
+    ef_pts = _polyline_points(x_um, e_fermi, 0.0, l_um, y_min, y_max, width, height, margin)
+
+    x0, y0, x1, y1 = margin, margin, width - margin, height - margin
+
+    def y_to_px(v):
+        return y1 - (v - y_min) / (y_max - y_min) * (y1 - y0)
+
+    xticks = [0.0, l_um * 0.25, l_um * 0.5, l_um * 0.75, l_um]
+    yticks = [y_min + i * (y_max - y_min) / 6.0 for i in range(7)]
+
+    svg = []
+    svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">')
+    svg.append('<rect width="100%" height="100%" fill="#f2f2f2"/>')
+
+    for t in xticks:
+        x = x0 + (t / l_um) * (x1 - x0)
+        svg.append(f'<line x1="{x:.2f}" y1="{y0}" x2="{x:.2f}" y2="{y1}" stroke="#d8d8d8" stroke-width="1"/>')
+    for t in yticks:
+        y = y_to_px(t)
+        svg.append(f'<line x1="{x0}" y1="{y:.2f}" x2="{x1}" y2="{y:.2f}" stroke="#d8d8d8" stroke-width="1"/>')
+
+    svg.append(f'<line x1="{x0}" y1="{y1}" x2="{x1}" y2="{y1}" stroke="#404040" stroke-width="2"/>')
+    svg.append(f'<line x1="{x0}" y1="{y0}" x2="{x0}" y2="{y1}" stroke="#404040" stroke-width="2"/>')
+
+    svg.append(f'<polyline points="{cbm_pts}" fill="none" stroke="#5b6cff" stroke-width="3"/>')
+    svg.append(f'<polyline points="{ef_pts}" fill="none" stroke="#333333" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<polyline points="{vbm_pts}" fill="none" stroke="#54d66b" stroke-width="3"/>')
+
+    legend_x, legend_y = x1 - 170, y0 + 20
+    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="145" height="95" fill="#ffffff" stroke="#333"/>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 20}" x2="{legend_x + 40}" y2="{legend_y + 20}" stroke="#5b6cff" stroke-width="3"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 25}" font-size="22" fill="#222">CBM</text>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#333" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_Fermi</text>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#54d66b" stroke-width="3"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">VBM</text>')
+
+    for t in xticks:
+        x = x0 + (t / l_um) * (x1 - x0)
+        svg.append(f'<text x="{x:.2f}" y="{y1 + 34}" text-anchor="middle" font-size="22" fill="#333">{t:.3g}</text>')
+    for t in yticks:
+        y = y_to_px(t)
+        svg.append(f'<text x="{x0 - 12}" y="{y + 7:.2f}" text-anchor="end" font-size="22" fill="#333">{t:.2f}</text>')
+
+    svg.append(f'<text x="{(x0 + x1) * 0.5}" y="{height - 12}" text-anchor="middle" font-size="36" fill="#333">Thickness (μm)</text>')
+    svg.append(f'<text x="24" y="{(y0 + y1) * 0.5}" text-anchor="middle" font-size="36" fill="#333" transform="rotate(-90 24 {(y0 + y1) * 0.5})">Energy (eV)</text>')
+
+    svg.append('</svg>')
+
+    with open(output_svg, "w", encoding="utf-8") as f:
+        f.write("\n".join(svg))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AlN 一维准费米能级 FEM 求解")
     parser.add_argument("--thickness-um", type=float, default=2.0, help="材料厚度 (um)")
@@ -149,6 +236,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--generation", type=float, default=8e30, help="表面体生成率 G0 (m^-3 s^-1)")
     parser.add_argument("--alpha", type=float, default=2e6, help="吸收系数 alpha (m^-1)")
     parser.add_argument("--output", type=str, default="aln_quasi_fermi.csv", help="输出 CSV 路径")
+    parser.add_argument("--plot", type=str, default="aln_fermi_profile.svg", help="输出费米能级分布图 (SVG)")
     return parser.parse_args()
 
 
@@ -177,9 +265,17 @@ def main() -> None:
                 result["E_fp_eV"][i],
             ])
 
+    write_fermi_plot_svg(
+        result=result,
+        thickness_um=args.thickness_um,
+        output_svg=args.plot,
+        voltage_v=args.voltage,
+    )
+
     print("求解完成。")
     print(f"厚度 = {params.thickness_m * 1e6:.3f} um, 电势 = {params.voltage_v:.3f} V, 单元数 = {params.elements}")
     print(f"结果写入: {args.output}")
+    print(f"图像写入: {args.plot}")
     print(f"E_fn 范围: [{min(result['E_fn_eV']):.4e}, {max(result['E_fn_eV']):.4e}] eV")
     print(f"E_fp 范围: [{min(result['E_fp_eV']):.4e}, {max(result['E_fp_eV']):.4e}] eV")
 

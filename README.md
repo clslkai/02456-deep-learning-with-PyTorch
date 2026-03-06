@@ -126,8 +126,11 @@ python semiconductor_fem/aln_quasi_fermi_fem.py \
   --thickness-um 2.0 \
   --voltage 4.0 \
   --elements 300 \
-  --output aln_quasi_fermi.csv
+  --output aln_quasi_fermi.csv \
+  --plot aln_fermi_profile.svg
 ```
 
 The CSV columns are:
 `z_m,n_m3,p_m3,E_fn_eV,E_fp_eV`.
+
+The script also exports a band/fermi one-dimensional profile figure (SVG), containing CBM / E_Fermi / VBM lines similar to a semiconductor band diagram.
