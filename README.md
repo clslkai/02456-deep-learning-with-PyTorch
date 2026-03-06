@@ -117,7 +117,7 @@ It models:
 - UV illumination from `z=0` with exponential carrier generation,
 - an applied potential at `z=L`,
 - steady-state electron/hole transport via diffusion-recombination equations,
-- and outputs the electron/hole quasi-Fermi levels versus `z`.
+- and outputs the electron/hole quasi-Fermi levels versus `z` (AlN default bandgap `Eg=6.2 eV`, intrinsic Fermi level at mid-gap).
 
 Example:
 
@@ -126,6 +126,7 @@ python semiconductor_fem/aln_quasi_fermi_fem.py \
   --thickness-um 2.0 \
   --voltage 4.0 \
   --elements 300 \
+  --bandgap-ev 6.2 \
   --output aln_quasi_fermi.csv \
   --plot aln_fermi_profile.svg
 ```

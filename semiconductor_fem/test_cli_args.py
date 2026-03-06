@@ -21,6 +21,8 @@ class TestAlnQuasiFermiCLI(unittest.TestCase):
                 "4.0",
                 "--elements",
                 "50",
+                "--bandgap-ev",
+                "6.2",
                 "--output",
                 str(out_csv),
                 "--plot",
@@ -34,7 +36,14 @@ class TestAlnQuasiFermiCLI(unittest.TestCase):
             with out_csv.open("r", encoding="utf-8") as f:
                 reader = csv.reader(f)
                 header = next(reader)
+                first_row = next(reader)
             self.assertEqual(header, ["z_m", "n_m3", "p_m3", "E_fn_eV", "E_fp_eV"])
+
+            # z=0 端为本征边界，费米能级应在禁带中心 Eg/2=3.1 eV 附近
+            efn0 = float(first_row[3])
+            efp0 = float(first_row[4])
+            self.assertAlmostEqual(efn0, 3.1, places=6)
+            self.assertAlmostEqual(efp0, 3.1, places=6)
 
             svg_text = out_svg.read_text(encoding="utf-8")
             self.assertIn("CBM", svg_text)

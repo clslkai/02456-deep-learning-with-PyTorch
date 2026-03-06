@@ -26,6 +26,7 @@ class AlNParameters:
     uv_generation_m3s: float = 8e30
     alpha_m_inv: float = 2e6
     elements: int = 300
+    bandgap_ev: float = 6.2
 
 
 class OneDFEMDriftDiffusion:
@@ -115,13 +116,22 @@ class OneDFEMDriftDiffusion:
         lower, diag, upper, rhs = self._apply_dirichlet_tridiag(lower, diag, upper, rhs, left, right)
         return self._solve_tridiagonal(lower, diag, upper, rhs)
 
+    def _band_edges(self):
+        # 以左端 VBM=0 eV 为参考，电压导致能带沿 z 线性弯曲
+        l = max(self.p.thickness_m, 1e-30)
+        e_vbm = [-(self.p.voltage_v * (z / l)) for z in self.z]
+        e_cbm = [ev + self.p.bandgap_ev for ev in e_vbm]
+        e_i = [(ec + ev) * 0.5 for ec, ev in zip(e_cbm, e_vbm)]
+        return e_vbm, e_cbm, e_i
+
     def solve(self):
         n_i = self.p.n_i_m3
 
+        # 本征边界：n=p=ni
         n_left = n_i
         p_left = n_i
-        n_right = n_i * math.exp(self.p.voltage_v / self.vt)
-        p_right = n_i * math.exp(-self.p.voltage_v / self.vt)
+        n_right = n_i
+        p_right = n_i
 
         n = self._solve_carrier(self.d_n, self.p.tau_n_s, n_left, n_right)
         p = self._solve_carrier(self.d_p, self.p.tau_p_s, p_left, p_right)
@@ -129,8 +139,14 @@ class OneDFEMDriftDiffusion:
         n = [max(val, 1e-30) for val in n]
         p = [max(val, 1e-30) for val in p]
 
-        e_fn = [self.vt * math.log(val / n_i) for val in n]
-        e_fp = [-self.vt * math.log(val / n_i) for val in p]
+        e_vbm, e_cbm, e_i = self._band_edges()
+        e_fn = [ei + self.vt * math.log(val / n_i) for ei, val in zip(e_i, n)]
+        e_fp = [ei - self.vt * math.log(val / n_i) for ei, val in zip(e_i, p)]
+
+        # 限制准费米能级位于禁带内，避免非物理超界
+        eps = 1e-6
+        e_fn = [min(max(ef, ev + eps), ec - eps) for ef, ev, ec in zip(e_fn, e_vbm, e_cbm)]
+        e_fp = [min(max(ef, ev + eps), ec - eps) for ef, ev, ec in zip(e_fp, e_vbm, e_cbm)]
 
         return {
             "z_m": self.z,
@@ -138,6 +154,9 @@ class OneDFEMDriftDiffusion:
             "p_m3": p,
             "E_fn_eV": e_fn,
             "E_fp_eV": e_fp,
+            "E_i_eV": e_i,
+            "E_cbm_eV": e_cbm,
+            "E_vbm_eV": e_vbm,
         }
 
 
@@ -151,24 +170,17 @@ def _polyline_points(xs, ys, x_min, x_max, y_min, y_max, width, height, margin):
     return " ".join(pts)
 
 
-def write_fermi_plot_svg(result, thickness_um, output_svg, voltage_v, cbm0_ev=0.35, vbm0_ev=-0.95):
-    z_m = result["z_m"]
-    x_um = [z * 1e6 for z in z_m]
+def write_fermi_plot_svg(result, thickness_um, output_svg):
+    x_um = [z * 1e6 for z in result["z_m"]]
     l_um = max(thickness_um, 1e-15)
 
-    # 用线性电势降构造示意能带边（和样图风格接近）
-    delta_ev = max(min(voltage_v * 0.06, 0.6), -0.6)
-    e_cbm = [cbm0_ev + delta_ev * (x / l_um) for x in x_um]
-    e_vbm = [vbm0_ev + delta_ev * (x / l_um) for x in x_um]
-
-    # 费米能级用电子/空穴准费米的中线表示
+    e_cbm = result["E_cbm_eV"]
+    e_vbm = result["E_vbm_eV"]
     e_fermi = [(a + b) * 0.5 for a, b in zip(result["E_fn_eV"], result["E_fp_eV"])]
 
     y_all = e_cbm + e_vbm + e_fermi
-    y_min = min(y_all) - 0.08
-    y_max = max(y_all) + 0.08
-    if abs(y_max - y_min) < 1e-12:
-        y_max = y_min + 1.0
+    y_min = min(y_all) - 0.2
+    y_max = max(y_all) + 0.2
 
     width, height = 900, 560
     margin = 70
@@ -235,6 +247,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--elements", type=int, default=300, help="有限元单元数")
     parser.add_argument("--generation", type=float, default=8e30, help="表面体生成率 G0 (m^-3 s^-1)")
     parser.add_argument("--alpha", type=float, default=2e6, help="吸收系数 alpha (m^-1)")
+    parser.add_argument("--bandgap-ev", type=float, default=6.2, help="带隙 Eg (eV), AlN 默认 6.2")
     parser.add_argument("--output", type=str, default="aln_quasi_fermi.csv", help="输出 CSV 路径")
     parser.add_argument("--plot", type=str, default="aln_fermi_profile.svg", help="输出费米能级分布图 (SVG)")
     return parser.parse_args()
@@ -248,6 +261,7 @@ def main() -> None:
         elements=args.elements,
         uv_generation_m3s=args.generation,
         alpha_m_inv=args.alpha,
+        bandgap_ev=args.bandgap_ev,
     )
 
     solver = OneDFEMDriftDiffusion(params)
@@ -269,11 +283,11 @@ def main() -> None:
         result=result,
         thickness_um=args.thickness_um,
         output_svg=args.plot,
-        voltage_v=args.voltage,
     )
 
     print("求解完成。")
     print(f"厚度 = {params.thickness_m * 1e6:.3f} um, 电势 = {params.voltage_v:.3f} V, 单元数 = {params.elements}")
+    print(f"带隙 Eg = {params.bandgap_ev:.3f} eV (本征费米位于禁带中心)")
     print(f"结果写入: {args.output}")
     print(f"图像写入: {args.plot}")
     print(f"E_fn 范围: [{min(result['E_fn_eV']):.4e}, {max(result['E_fn_eV']):.4e}] eV")
