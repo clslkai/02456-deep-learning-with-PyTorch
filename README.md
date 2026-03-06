@@ -108,3 +108,26 @@ If you're interested in some PyTorch codebases check out the following links (re
 - [More tutorials](https://github.com/pytorch/tutorials)
 - [Discuss PyTorch on the Forums](https://discuss.pytorch.org/)
 - [Chat with other users on Slack](http://pytorch.slack.com/messages/beginner/)
+
+## 8. One-dimensional AlN FEM quasi-Fermi solver
+
+A standalone finite-element script is provided at `semiconductor_fem/aln_quasi_fermi_fem.py` for a 1D AlN wide-bandgap semiconductor model.
+
+It models:
+- UV illumination from `z=0` with exponential carrier generation,
+- an applied potential at `z=L`,
+- steady-state electron/hole transport via diffusion-recombination equations,
+- and outputs the electron/hole quasi-Fermi levels versus `z`.
+
+Example:
+
+```bash
+python semiconductor_fem/aln_quasi_fermi_fem.py \
+  --thickness-um 2.0 \
+  --voltage 4.0 \
+  --elements 300 \
+  --output aln_quasi_fermi.csv
+```
+
+The CSV columns are:
+`z_m,n_m3,p_m3,E_fn_eV,E_fp_eV`.
