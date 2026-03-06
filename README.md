@@ -134,7 +134,7 @@ python semiconductor_fem/aln_quasi_fermi_fem.py \
 The CSV columns are:
 `z_m,n_m3,p_m3,E_fn_eV,E_fp_eV`.
 
-The script also exports a band/fermi one-dimensional profile figure (SVG), containing CBM / E_Fermi / VBM lines similar to a semiconductor band diagram.
+The script also exports a band/fermi one-dimensional profile figure (SVG), containing CBM / E_Fn / E_Fp / VBM lines to show quasi-Fermi-level splitting under photo-generated carriers.
 
 > Note: run with `python`/`python3` from the repository root.
 > If you still see `unrecognized arguments: --plot`, update to the latest commit and check `python semiconductor_fem/aln_quasi_fermi_fem.py --help` includes `--plot`.

@@ -47,7 +47,8 @@ class TestAlnQuasiFermiCLI(unittest.TestCase):
 
             svg_text = out_svg.read_text(encoding="utf-8")
             self.assertIn("CBM", svg_text)
-            self.assertIn("E_Fermi", svg_text)
+            self.assertIn("E_Fn", svg_text)
+            self.assertIn("E_Fp", svg_text)
             self.assertIn("VBM", svg_text)
 
 

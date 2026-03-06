@@ -176,9 +176,10 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
 
     e_cbm = result["E_cbm_eV"]
     e_vbm = result["E_vbm_eV"]
-    e_fermi = [(a + b) * 0.5 for a, b in zip(result["E_fn_eV"], result["E_fp_eV"])]
+    e_fn = result["E_fn_eV"]
+    e_fp = result["E_fp_eV"]
 
-    y_all = e_cbm + e_vbm + e_fermi
+    y_all = e_cbm + e_vbm + e_fn + e_fp
     y_min = min(y_all) - 0.2
     y_max = max(y_all) + 0.2
 
@@ -187,7 +188,8 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
 
     cbm_pts = _polyline_points(x_um, e_cbm, 0.0, l_um, y_min, y_max, width, height, margin)
     vbm_pts = _polyline_points(x_um, e_vbm, 0.0, l_um, y_min, y_max, width, height, margin)
-    ef_pts = _polyline_points(x_um, e_fermi, 0.0, l_um, y_min, y_max, width, height, margin)
+    efn_pts = _polyline_points(x_um, e_fn, 0.0, l_um, y_min, y_max, width, height, margin)
+    efp_pts = _polyline_points(x_um, e_fp, 0.0, l_um, y_min, y_max, width, height, margin)
 
     x0, y0, x1, y1 = margin, margin, width - margin, height - margin
 
@@ -212,17 +214,20 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
     svg.append(f'<line x1="{x0}" y1="{y0}" x2="{x0}" y2="{y1}" stroke="#404040" stroke-width="2"/>')
 
     svg.append(f'<polyline points="{cbm_pts}" fill="none" stroke="#5b6cff" stroke-width="3"/>')
-    svg.append(f'<polyline points="{ef_pts}" fill="none" stroke="#333333" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<polyline points="{efn_pts}" fill="none" stroke="#222222" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<polyline points="{efp_pts}" fill="none" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>')
     svg.append(f'<polyline points="{vbm_pts}" fill="none" stroke="#54d66b" stroke-width="3"/>')
 
     legend_x, legend_y = x1 - 170, y0 + 20
-    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="145" height="95" fill="#ffffff" stroke="#333"/>')
+    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="165" height="120" fill="#ffffff" stroke="#333"/>')
     svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 20}" x2="{legend_x + 40}" y2="{legend_y + 20}" stroke="#5b6cff" stroke-width="3"/>')
     svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 25}" font-size="22" fill="#222">CBM</text>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#333" stroke-width="2.5" stroke-dasharray="8,6"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_Fermi</text>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#54d66b" stroke-width="3"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">VBM</text>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_Fn</text>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">E_Fp</text>')
+    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 101}" x2="{legend_x + 40}" y2="{legend_y + 101}" stroke="#54d66b" stroke-width="3"/>')
+    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 106}" font-size="22" fill="#222">VBM</text>')
 
     for t in xticks:
         x = x0 + (t / l_um) * (x1 - x0)
@@ -290,8 +295,10 @@ def main() -> None:
     print(f"带隙 Eg = {params.bandgap_ev:.3f} eV (本征费米位于禁带中心)")
     print(f"结果写入: {args.output}")
     print(f"图像写入: {args.plot}")
-    print(f"E_fn 范围: [{min(result['E_fn_eV']):.4e}, {max(result['E_fn_eV']):.4e}] eV")
-    print(f"E_fp 范围: [{min(result['E_fp_eV']):.4e}, {max(result['E_fp_eV']):.4e}] eV")
+    print(f"E_Fn 范围: [{min(result['E_fn_eV']):.4e}, {max(result['E_fn_eV']):.4e}] eV")
+    print(f"E_Fp 范围: [{min(result['E_fp_eV']):.4e}, {max(result['E_fp_eV']):.4e}] eV")
+    split = [abs(a-b) for a,b in zip(result["E_fn_eV"], result["E_fp_eV"])]
+    print(f"准费米能级劈裂 max|E_Fn-E_Fp| = {max(split):.4e} eV")
 
 
 if __name__ == "__main__":
