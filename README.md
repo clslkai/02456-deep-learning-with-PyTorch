@@ -127,6 +127,7 @@ python semiconductor_fem/aln_quasi_fermi_fem.py \
   --voltage 4.0 \
   --elements 300 \
   --bandgap-ev 6.2 \
+  --mode equilibrium \
   --output aln_quasi_fermi.csv \
   --plot aln_fermi_profile.svg
 ```
@@ -134,7 +135,9 @@ python semiconductor_fem/aln_quasi_fermi_fem.py \
 The CSV columns are:
 `z_m,n_m3,p_m3,E_fn_eV,E_fp_eV`.
 
-The script also exports a band/fermi one-dimensional profile figure (SVG), containing CBM / E_Fn / E_Fp / VBM lines to show quasi-Fermi-level splitting under photo-generated carriers.
+The script also exports a band/fermi one-dimensional profile figure (SVG).
+- default `--mode equilibrium`: no-current review plot with **flat `E_F`** and tilted CBM/VBM (recommended for electrostatic band-bending checks).
+- optional `--mode quasi-fermi`: non-equilibrium approximation with split `E_Fn` / `E_Fp`.
 
 > Note: run with `python`/`python3` from the repository root.
 > If you still see `unrecognized arguments: --plot`, update to the latest commit and check `python semiconductor_fem/aln_quasi_fermi_fem.py --help` includes `--plot`.

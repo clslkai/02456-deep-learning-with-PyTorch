@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""一维 AlN 宽禁带半导体准费米能级有限元求解器（纯标准库实现）。"""
+"""一维 AlN 宽禁带半导体能带/费米能级求解与绘图（纯标准库）。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import argparse
 import csv
 import math
 from dataclasses import dataclass
-
 
 Q = 1.602176634e-19
 K_B = 1.380649e-23
@@ -27,6 +26,7 @@ class AlNParameters:
     alpha_m_inv: float = 2e6
     elements: int = 300
     bandgap_ev: float = 6.2
+    mode: str = "equilibrium"  # equilibrium | quasi-fermi
 
 
 class OneDFEMDriftDiffusion:
@@ -48,34 +48,28 @@ class OneDFEMDriftDiffusion:
         diag = [0.0] * n
         upper = [0.0] * (n - 1)
         rhs = [0.0] * n
-
         for e in range(n - 1):
             h = self.h
             z0 = self.z[e]
             z1 = self.z[e + 1]
             g0 = self.generation(z0)
             g1 = self.generation(z1)
-
             k00 = diffusion / h + h / (3.0 * tau)
             k01 = -diffusion / h + h / (6.0 * tau)
             k11 = diffusion / h + h / (3.0 * tau)
-
             f0 = h / 6.0 * (2.0 * g0 + g1)
             f1 = h / 6.0 * (g0 + 2.0 * g1)
-
             diag[e] += k00
             upper[e] += k01
             lower[e] += k01
             diag[e + 1] += k11
             rhs[e] += f0
             rhs[e + 1] += f1
-
         return lower, diag, upper, rhs
 
     @staticmethod
     def _apply_dirichlet_tridiag(lower, diag, upper, rhs, left_value, right_value):
         n = len(diag)
-
         rhs[1] -= lower[0] * left_value
         lower[0] = 0.0
         diag[0] = 1.0
@@ -87,7 +81,6 @@ class OneDFEMDriftDiffusion:
         diag[n - 1] = 1.0
         lower[n - 2] = 0.0
         rhs[n - 1] = right_value
-
         return lower, diag, upper, rhs
 
     @staticmethod
@@ -96,19 +89,14 @@ class OneDFEMDriftDiffusion:
         c = upper[:]
         d = rhs[:]
         b = diag[:]
-
         for i in range(1, n):
-            if abs(b[i - 1]) < 1e-300:
-                raise ZeroDivisionError("三对角求解出现零主元。")
             w = lower[i - 1] / b[i - 1]
-            b[i] -= w * c[i - 1] if i - 1 < len(c) else 0.0
+            b[i] -= w * c[i - 1]
             d[i] -= w * d[i - 1]
-
         x = [0.0] * n
         x[-1] = d[-1] / b[-1]
         for i in range(n - 2, -1, -1):
             x[i] = (d[i] - c[i] * x[i + 1]) / b[i]
-
         return x
 
     def _solve_carrier(self, diffusion: float, tau: float, left: float, right: float):
@@ -117,7 +105,6 @@ class OneDFEMDriftDiffusion:
         return self._solve_tridiagonal(lower, diag, upper, rhs)
 
     def _band_edges(self):
-        # 以左端 VBM=0 eV 为参考，电压导致能带沿 z 线性弯曲
         l = max(self.p.thickness_m, 1e-30)
         e_vbm = [-(self.p.voltage_v * (z / l)) for z in self.z]
         e_cbm = [ev + self.p.bandgap_ev for ev in e_vbm]
@@ -126,27 +113,24 @@ class OneDFEMDriftDiffusion:
 
     def solve(self):
         n_i = self.p.n_i_m3
-
-        # 本征边界：n=p=ni
-        n_left = n_i
-        p_left = n_i
-        n_right = n_i
-        p_right = n_i
-
-        n = self._solve_carrier(self.d_n, self.p.tau_n_s, n_left, n_right)
-        p = self._solve_carrier(self.d_p, self.p.tau_p_s, p_left, p_right)
-
-        n = [max(val, 1e-30) for val in n]
-        p = [max(val, 1e-30) for val in p]
-
         e_vbm, e_cbm, e_i = self._band_edges()
-        e_fn = [ei + self.vt * math.log(val / n_i) for ei, val in zip(e_i, n)]
-        e_fp = [ei - self.vt * math.log(val / n_i) for ei, val in zip(e_i, p)]
 
-        # 限制准费米能级位于禁带内，避免非物理超界
-        eps = 1e-6
-        e_fn = [min(max(ef, ev + eps), ec - eps) for ef, ev, ec in zip(e_fn, e_vbm, e_cbm)]
-        e_fp = [min(max(ef, ev + eps), ec - eps) for ef, ev, ec in zip(e_fp, e_vbm, e_cbm)]
+        if self.p.mode == "equilibrium":
+            # 无电流平衡近似：总费米能级应为常数（平的）
+            e_f0 = e_i[0]
+            e_f = [e_f0 for _ in self.z]
+            n = [n_i * math.exp((ef - ei) / self.vt) for ef, ei in zip(e_f, e_i)]
+            p = [n_i * math.exp(-(ef - ei) / self.vt) for ef, ei in zip(e_f, e_i)]
+            e_fn = e_f[:]
+            e_fp = e_f[:]
+        else:
+            # 非平衡近似（含光生复合）：会出现 E_Fn/E_Fp 劈裂
+            n = self._solve_carrier(self.d_n, self.p.tau_n_s, n_i, n_i)
+            p = self._solve_carrier(self.d_p, self.p.tau_p_s, n_i, n_i)
+            n = [max(val, 1e-30) for val in n]
+            p = [max(val, 1e-30) for val in p]
+            e_fn = [ei + self.vt * math.log(val / n_i) for ei, val in zip(e_i, n)]
+            e_fp = [ei - self.vt * math.log(val / n_i) for ei, val in zip(e_i, p)]
 
         return {
             "z_m": self.z,
@@ -154,43 +138,37 @@ class OneDFEMDriftDiffusion:
             "p_m3": p,
             "E_fn_eV": e_fn,
             "E_fp_eV": e_fp,
-            "E_i_eV": e_i,
             "E_cbm_eV": e_cbm,
             "E_vbm_eV": e_vbm,
+            "mode": self.p.mode,
         }
 
 
 def _polyline_points(xs, ys, x_min, x_max, y_min, y_max, width, height, margin):
     x0, y0, x1, y1 = margin, margin, width - margin, height - margin
-    pts = []
-    for x, y in zip(xs, ys):
-        xp = x0 + (x - x_min) / (x_max - x_min) * (x1 - x0)
-        yp = y1 - (y - y_min) / (y_max - y_min) * (y1 - y0)
-        pts.append(f"{xp:.2f},{yp:.2f}")
-    return " ".join(pts)
+    return " ".join(
+        f"{(x0 + (x - x_min) / (x_max - x_min) * (x1 - x0)):.2f},{(y1 - (y - y_min) / (y_max - y_min) * (y1 - y0)):.2f}"
+        for x, y in zip(xs, ys)
+    )
 
 
 def write_fermi_plot_svg(result, thickness_um, output_svg):
     x_um = [z * 1e6 for z in result["z_m"]]
     l_um = max(thickness_um, 1e-15)
+    e_cbm, e_vbm = result["E_cbm_eV"], result["E_vbm_eV"]
+    e_fn, e_fp = result["E_fn_eV"], result["E_fp_eV"]
 
-    e_cbm = result["E_cbm_eV"]
-    e_vbm = result["E_vbm_eV"]
-    e_fn = result["E_fn_eV"]
-    e_fp = result["E_fp_eV"]
+    if result["mode"] == "equilibrium":
+        y_all = e_cbm + e_vbm + e_fn
+    else:
+        y_all = e_cbm + e_vbm + e_fn + e_fp
+    y_min, y_max = min(y_all) - 0.2, max(y_all) + 0.2
 
-    y_all = e_cbm + e_vbm + e_fn + e_fp
-    y_min = min(y_all) - 0.2
-    y_max = max(y_all) + 0.2
-
-    width, height = 900, 560
-    margin = 70
-
+    width, height, margin = 900, 560, 70
     cbm_pts = _polyline_points(x_um, e_cbm, 0.0, l_um, y_min, y_max, width, height, margin)
     vbm_pts = _polyline_points(x_um, e_vbm, 0.0, l_um, y_min, y_max, width, height, margin)
     efn_pts = _polyline_points(x_um, e_fn, 0.0, l_um, y_min, y_max, width, height, margin)
     efp_pts = _polyline_points(x_um, e_fp, 0.0, l_um, y_min, y_max, width, height, margin)
-
     x0, y0, x1, y1 = margin, margin, width - margin, height - margin
 
     def y_to_px(v):
@@ -199,10 +177,10 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
     xticks = [0.0, l_um * 0.25, l_um * 0.5, l_um * 0.75, l_um]
     yticks = [y_min + i * (y_max - y_min) / 6.0 for i in range(7)]
 
-    svg = []
-    svg.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">')
-    svg.append('<rect width="100%" height="100%" fill="#f2f2f2"/>')
-
+    svg = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        '<rect width="100%" height="100%" fill="#f2f2f2"/>',
+    ]
     for t in xticks:
         x = x0 + (t / l_um) * (x1 - x0)
         svg.append(f'<line x1="{x:.2f}" y1="{y0}" x2="{x:.2f}" y2="{y1}" stroke="#d8d8d8" stroke-width="1"/>')
@@ -210,24 +188,39 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
         y = y_to_px(t)
         svg.append(f'<line x1="{x0}" y1="{y:.2f}" x2="{x1}" y2="{y:.2f}" stroke="#d8d8d8" stroke-width="1"/>')
 
-    svg.append(f'<line x1="{x0}" y1="{y1}" x2="{x1}" y2="{y1}" stroke="#404040" stroke-width="2"/>')
-    svg.append(f'<line x1="{x0}" y1="{y0}" x2="{x0}" y2="{y1}" stroke="#404040" stroke-width="2"/>')
+    svg += [
+        f'<line x1="{x0}" y1="{y1}" x2="{x1}" y2="{y1}" stroke="#404040" stroke-width="2"/>',
+        f'<line x1="{x0}" y1="{y0}" x2="{x0}" y2="{y1}" stroke="#404040" stroke-width="2"/>',
+        f'<polyline points="{cbm_pts}" fill="none" stroke="#5b6cff" stroke-width="3"/>',
+        f'<polyline points="{vbm_pts}" fill="none" stroke="#54d66b" stroke-width="3"/>',
+    ]
 
-    svg.append(f'<polyline points="{cbm_pts}" fill="none" stroke="#5b6cff" stroke-width="3"/>')
-    svg.append(f'<polyline points="{efn_pts}" fill="none" stroke="#222222" stroke-width="2.5" stroke-dasharray="8,6"/>')
-    svg.append(f'<polyline points="{efp_pts}" fill="none" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>')
-    svg.append(f'<polyline points="{vbm_pts}" fill="none" stroke="#54d66b" stroke-width="3"/>')
-
-    legend_x, legend_y = x1 - 170, y0 + 20
-    svg.append(f'<rect x="{legend_x}" y="{legend_y}" width="165" height="120" fill="#ffffff" stroke="#333"/>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 20}" x2="{legend_x + 40}" y2="{legend_y + 20}" stroke="#5b6cff" stroke-width="3"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 25}" font-size="22" fill="#222">CBM</text>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_Fn</text>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">E_Fp</text>')
-    svg.append(f'<line x1="{legend_x + 10}" y1="{legend_y + 101}" x2="{legend_x + 40}" y2="{legend_y + 101}" stroke="#54d66b" stroke-width="3"/>')
-    svg.append(f'<text x="{legend_x + 45}" y="{legend_y + 106}" font-size="22" fill="#222">VBM</text>')
+    legend_x, legend_y = x1 - 190, y0 + 20
+    if result["mode"] == "equilibrium":
+        svg += [
+            f'<polyline points="{efn_pts}" fill="none" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<rect x="{legend_x}" y="{legend_y}" width="185" height="95" fill="#ffffff" stroke="#333"/>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 20}" x2="{legend_x + 40}" y2="{legend_y + 20}" stroke="#5b6cff" stroke-width="3"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 25}" font-size="22" fill="#222">CBM</text>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_F (flat)</text>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#54d66b" stroke-width="3"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">VBM</text>',
+        ]
+    else:
+        svg += [
+            f'<polyline points="{efn_pts}" fill="none" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<polyline points="{efp_pts}" fill="none" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<rect x="{legend_x}" y="{legend_y}" width="185" height="120" fill="#ffffff" stroke="#333"/>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 20}" x2="{legend_x + 40}" y2="{legend_y + 20}" stroke="#5b6cff" stroke-width="3"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 25}" font-size="22" fill="#222">CBM</text>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 47}" x2="{legend_x + 40}" y2="{legend_y + 47}" stroke="#222" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 52}" font-size="22" fill="#222">E_Fn</text>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 74}" x2="{legend_x + 40}" y2="{legend_y + 74}" stroke="#d62728" stroke-width="2.5" stroke-dasharray="8,6"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 79}" font-size="22" fill="#222">E_Fp</text>',
+            f'<line x1="{legend_x + 10}" y1="{legend_y + 101}" x2="{legend_x + 40}" y2="{legend_y + 101}" stroke="#54d66b" stroke-width="3"/>',
+            f'<text x="{legend_x + 45}" y="{legend_y + 106}" font-size="22" fill="#222">VBM</text>',
+        ]
 
     for t in xticks:
         x = x0 + (t / l_um) * (x1 - x0)
@@ -236,25 +229,24 @@ def write_fermi_plot_svg(result, thickness_um, output_svg):
         y = y_to_px(t)
         svg.append(f'<text x="{x0 - 12}" y="{y + 7:.2f}" text-anchor="end" font-size="22" fill="#333">{t:.2f}</text>')
 
-    svg.append(f'<text x="{(x0 + x1) * 0.5}" y="{height - 12}" text-anchor="middle" font-size="36" fill="#333">Thickness (μm)</text>')
-    svg.append(f'<text x="24" y="{(y0 + y1) * 0.5}" text-anchor="middle" font-size="36" fill="#333" transform="rotate(-90 24 {(y0 + y1) * 0.5})">Energy (eV)</text>')
-
+    svg.append(f'<text x="{(x0 + x1) * 0.5}" y="{height - 12}" text-anchor="middle" font-size="36" fill="#333">Spatial coordinate (μm)</text>')
+    svg.append(f'<text x="24" y="{(y0 + y1) * 0.5}" text-anchor="middle" font-size="36" fill="#333" transform="rotate(-90 24 {(y0 + y1) * 0.5})">Band energy (eV)</text>')
     svg.append('</svg>')
-
     with open(output_svg, "w", encoding="utf-8") as f:
         f.write("\n".join(svg))
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="AlN 一维准费米能级 FEM 求解")
-    parser.add_argument("--thickness-um", type=float, default=2.0, help="材料厚度 (um)")
-    parser.add_argument("--voltage", type=float, default=4.0, help="施加电势 (V)")
-    parser.add_argument("--elements", type=int, default=300, help="有限元单元数")
-    parser.add_argument("--generation", type=float, default=8e30, help="表面体生成率 G0 (m^-3 s^-1)")
-    parser.add_argument("--alpha", type=float, default=2e6, help="吸收系数 alpha (m^-1)")
-    parser.add_argument("--bandgap-ev", type=float, default=6.2, help="带隙 Eg (eV), AlN 默认 6.2")
-    parser.add_argument("--output", type=str, default="aln_quasi_fermi.csv", help="输出 CSV 路径")
-    parser.add_argument("--plot", type=str, default="aln_fermi_profile.svg", help="输出费米能级分布图 (SVG)")
+    parser.add_argument("--thickness-um", type=float, default=2.0)
+    parser.add_argument("--voltage", type=float, default=4.0)
+    parser.add_argument("--elements", type=int, default=300)
+    parser.add_argument("--generation", type=float, default=8e30)
+    parser.add_argument("--alpha", type=float, default=2e6)
+    parser.add_argument("--bandgap-ev", type=float, default=6.2)
+    parser.add_argument("--mode", choices=["equilibrium", "quasi-fermi"], default="equilibrium", help="equilibrium: 无电流平衡平带费米；quasi-fermi: 非平衡劈裂")
+    parser.add_argument("--output", type=str, default="aln_quasi_fermi.csv")
+    parser.add_argument("--plot", type=str, default="aln_fermi_profile.svg")
     return parser.parse_args()
 
 
@@ -267,8 +259,8 @@ def main() -> None:
         uv_generation_m3s=args.generation,
         alpha_m_inv=args.alpha,
         bandgap_ev=args.bandgap_ev,
+        mode=args.mode,
     )
-
     solver = OneDFEMDriftDiffusion(params)
     result = solver.solve()
 
@@ -276,29 +268,15 @@ def main() -> None:
         writer = csv.writer(f)
         writer.writerow(["z_m", "n_m3", "p_m3", "E_fn_eV", "E_fp_eV"])
         for i in range(len(result["z_m"])):
-            writer.writerow([
-                result["z_m"][i],
-                result["n_m3"][i],
-                result["p_m3"][i],
-                result["E_fn_eV"][i],
-                result["E_fp_eV"][i],
-            ])
+            writer.writerow([result["z_m"][i], result["n_m3"][i], result["p_m3"][i], result["E_fn_eV"][i], result["E_fp_eV"][i]])
 
-    write_fermi_plot_svg(
-        result=result,
-        thickness_um=args.thickness_um,
-        output_svg=args.plot,
-    )
-
+    write_fermi_plot_svg(result=result, thickness_um=args.thickness_um, output_svg=args.plot)
     print("求解完成。")
-    print(f"厚度 = {params.thickness_m * 1e6:.3f} um, 电势 = {params.voltage_v:.3f} V, 单元数 = {params.elements}")
-    print(f"带隙 Eg = {params.bandgap_ev:.3f} eV (本征费米位于禁带中心)")
+    print(f"mode = {params.mode}, Eg = {params.bandgap_ev:.3f} eV")
     print(f"结果写入: {args.output}")
     print(f"图像写入: {args.plot}")
-    print(f"E_Fn 范围: [{min(result['E_fn_eV']):.4e}, {max(result['E_fn_eV']):.4e}] eV")
-    print(f"E_Fp 范围: [{min(result['E_fp_eV']):.4e}, {max(result['E_fp_eV']):.4e}] eV")
-    split = [abs(a-b) for a,b in zip(result["E_fn_eV"], result["E_fp_eV"])]
-    print(f"准费米能级劈裂 max|E_Fn-E_Fp| = {max(split):.4e} eV")
+    split = [abs(a - b) for a, b in zip(result["E_fn_eV"], result["E_fp_eV"])]
+    print(f"max|E_Fn-E_Fp| = {max(split):.4e} eV")
 
 
 if __name__ == "__main__":

@@ -6,50 +6,50 @@ from pathlib import Path
 
 
 class TestAlnQuasiFermiCLI(unittest.TestCase):
-    def test_plot_argument_is_supported_and_outputs_files(self):
+    def test_default_equilibrium_has_flat_fermi(self):
         script = Path(__file__).with_name("aln_quasi_fermi_fem.py")
         with tempfile.TemporaryDirectory() as tmp:
-            out_csv = Path(tmp) / "out.csv"
-            out_svg = Path(tmp) / "out.svg"
-
+            out_csv = Path(tmp) / "eq.csv"
+            out_svg = Path(tmp) / "eq.svg"
             cmd = [
-                "python",
-                str(script),
-                "--thickness-um",
-                "0.05",
-                "--voltage",
-                "4.0",
-                "--elements",
-                "50",
-                "--bandgap-ev",
-                "6.2",
-                "--output",
-                str(out_csv),
-                "--plot",
-                str(out_svg),
+                "python", str(script),
+                "--thickness-um", "0.05",
+                "--voltage", "4.0",
+                "--elements", "50",
+                "--bandgap-ev", "6.2",
+                "--output", str(out_csv),
+                "--plot", str(out_svg),
             ]
             result = subprocess.run(cmd, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertTrue(out_csv.exists(), "CSV output was not created")
-            self.assertTrue(out_svg.exists(), "SVG output was not created")
-
             with out_csv.open("r", encoding="utf-8") as f:
-                reader = csv.reader(f)
-                header = next(reader)
-                first_row = next(reader)
+                r = csv.reader(f)
+                header = next(r)
+                rows = list(r)
             self.assertEqual(header, ["z_m", "n_m3", "p_m3", "E_fn_eV", "E_fp_eV"])
+            efn = [float(row[3]) for row in rows]
+            efp = [float(row[4]) for row in rows]
+            self.assertAlmostEqual(max(efn) - min(efn), 0.0, places=9)
+            self.assertAlmostEqual(max(efp) - min(efp), 0.0, places=9)
+            self.assertAlmostEqual(efn[0], 3.1, places=6)
+            self.assertIn("E_F (flat)", out_svg.read_text(encoding="utf-8"))
 
-            # z=0 端为本征边界，费米能级应在禁带中心 Eg/2=3.1 eV 附近
-            efn0 = float(first_row[3])
-            efp0 = float(first_row[4])
-            self.assertAlmostEqual(efn0, 3.1, places=6)
-            self.assertAlmostEqual(efp0, 3.1, places=6)
-
-            svg_text = out_svg.read_text(encoding="utf-8")
-            self.assertIn("CBM", svg_text)
-            self.assertIn("E_Fn", svg_text)
-            self.assertIn("E_Fp", svg_text)
-            self.assertIn("VBM", svg_text)
+    def test_quasi_fermi_mode_has_split_labels(self):
+        script = Path(__file__).with_name("aln_quasi_fermi_fem.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            out_svg = Path(tmp) / "qf.svg"
+            out_csv = Path(tmp) / "qf.csv"
+            cmd = [
+                "python", str(script),
+                "--mode", "quasi-fermi",
+                "--output", str(out_csv),
+                "--plot", str(out_svg),
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            svg = out_svg.read_text(encoding="utf-8")
+            self.assertIn("E_Fn", svg)
+            self.assertIn("E_Fp", svg)
 
 
 if __name__ == "__main__":
