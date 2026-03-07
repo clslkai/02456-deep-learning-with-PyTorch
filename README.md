@@ -108,3 +108,36 @@ If you're interested in some PyTorch codebases check out the following links (re
 - [More tutorials](https://github.com/pytorch/tutorials)
 - [Discuss PyTorch on the Forums](https://discuss.pytorch.org/)
 - [Chat with other users on Slack](http://pytorch.slack.com/messages/beginner/)
+
+## 8. One-dimensional AlN FEM quasi-Fermi solver
+
+A standalone finite-element script is provided at `semiconductor_fem/aln_quasi_fermi_fem.py` for a 1D AlN wide-bandgap semiconductor model.
+
+It models:
+- UV illumination from `z=0` with exponential carrier generation,
+- an applied potential at `z=L`,
+- steady-state electron/hole transport via diffusion-recombination equations,
+- and outputs the electron/hole quasi-Fermi levels versus `z` (AlN default bandgap `Eg=6.2 eV`, intrinsic Fermi level at mid-gap).
+
+Example:
+
+```bash
+python semiconductor_fem/aln_quasi_fermi_fem.py \
+  --thickness-um 2.0 \
+  --voltage 4.0 \
+  --elements 300 \
+  --bandgap-ev 6.2 \
+  --mode equilibrium \
+  --output aln_quasi_fermi.csv \
+  --plot aln_fermi_profile.svg
+```
+
+The CSV columns are:
+`z_m,n_m3,p_m3,E_fn_eV,E_fp_eV`.
+
+The script also exports a band/fermi one-dimensional profile figure (SVG).
+- default `--mode equilibrium`: no-current review plot with **flat `E_F`** and tilted CBM/VBM (recommended for electrostatic band-bending checks).
+- optional `--mode quasi-fermi`: non-equilibrium approximation with split `E_Fn` / `E_Fp`.
+
+> Note: run with `python`/`python3` from the repository root.
+> If you still see `unrecognized arguments: --plot`, update to the latest commit and check `python semiconductor_fem/aln_quasi_fermi_fem.py --help` includes `--plot`.
